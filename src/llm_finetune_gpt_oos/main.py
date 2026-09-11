@@ -6,7 +6,7 @@ from .utils.logging_utils import configure_logging
 
 def parse_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(prog="sales-finetune")
-    parser.add_argument("command", choices=["prepare-data", "generate-sales-playbook", "train", "evaluate", "infer"])
+    parser.add_argument("command", choices=["prepare-data", "generate-sales-playbook", "generate-smart-sales", "train", "evaluate", "infer"])
     parser.add_argument("--config", default=None)
     parser.add_argument("--prompt", default=None)
     parser.add_argument("--adapter-path", default=None)
@@ -24,6 +24,11 @@ def main() -> None:
         from .data.generate_sales_playbook import generate_sales_playbook
 
         result = generate_sales_playbook(args.config or "configs/synthetic_sales.yaml")
+    elif args.command == "generate-smart-sales":
+        from .data.generate_smart_sales_dataset import generate_dataset
+
+        generate_dataset()
+        result = {"status": "ok"}
     elif args.command == "train":
         from .models.trainer import SalesQLoRATrainer
 
