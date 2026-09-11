@@ -1,0 +1,15 @@
+model:
+  base_model_id: Qwen/Qwen3.5-9B
+  adapter_path: ./artifacts/runs/qwen35-sales-qlora/final_adapter
+  cache_dir: ./cache/huggingface
+  trust_remote_code: true
+  quantization:
+    load_in_4bit: true
+    quant_type: nf4
+    compute_dtype: bfloat16
+    double_quant: true
+generation:
+  max_new_tokens: 512
+  temperature: 0.2
+  top_p: 0.9
+  repetition_penalty: 1.05

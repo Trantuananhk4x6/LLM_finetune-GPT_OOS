@@ -1,0 +1,16 @@
+input_dir: ./data/raw
+extraction_dir: ./data/staging
+output_dir: ./data/processed
+split:
+  train_ratio: 0.9
+  seed: 42
+sampling:
+  max_rows_per_table: 25000
+  examples_per_row: 2
+quality:
+  min_assistant_characters: 40
+  redact_pii: true
+source:
+  name: retail-customer-and-transaction-dataset
+  url: https://www.kaggle.com/datasets/raghavendragandhi/retail-customer-and-transaction-dataset
+  license: MIT
