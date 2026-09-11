@@ -20,7 +20,7 @@ data/raw/
 *.parquet
 *.arrow
 
-models/
+/models/
 cache/
 artifacts/
 sales-finetune-colab-*.zip
