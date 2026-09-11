@@ -11,6 +11,6 @@ quality:
   min_assistant_characters: 40
   redact_pii: true
 source:
-  name: retail-customer-and-transaction-dataset
-  url: https://www.kaggle.com/datasets/raghavendragandhi/retail-customer-and-transaction-dataset
-  license: MIT
+  name: uci-online-retail
+  url: https://archive.ics.uci.edu/dataset/352/online+retail
+  license: CC-BY-4.0

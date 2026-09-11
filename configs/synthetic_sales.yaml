@@ -1,0 +1,4 @@
+output_dir: ./data/processed
+count: 1000000
+validation_ratio: 0.1
+seed: 20260911

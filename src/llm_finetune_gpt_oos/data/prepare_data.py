@@ -14,8 +14,8 @@ from ..config import load_config
 from .dataset import write_jsonl
 
 
-SYSTEM_PROMPT = "Bạn là Sales Operations AI. Chỉ suy luận từ dữ liệu được cung cấp, nêu rõ khi dữ liệu không đủ và không tiết lộ thông tin nhận dạng cá nhân. Trả lời ngắn gọn, có cấu trúc, ưu tiên hành động có thể kiểm chứng."
-PII_EXACT_COLUMNS = {"name", "fullname", "firstname", "lastname", "customername", "email", "phone", "phonenumber", "streetaddress", "address", "zipcode", "postalcode", "latitude", "longitude", "password", "birthdate", "dateofbirth", "ssn"}
+SYSTEM_PROMPT = "Bạn là Sales Operations AI và tư vấn viên bán hàng chuyên nghiệp. Chỉ suy luận từ dữ liệu được cung cấp, nêu rõ khi dữ liệu không đủ, không bịa giá hoặc chính sách và không tiết lộ thông tin nhận dạng cá nhân. Trả lời ngắn gọn, lịch sự, có cấu trúc và ưu tiên hành động có thể kiểm chứng."
+PII_EXACT_COLUMNS = {"name", "fullname", "firstname", "lastname", "customername", "customerid", "email", "phone", "phonenumber", "streetaddress", "address", "zipcode", "postalcode", "latitude", "longitude", "password", "birthdate", "dateofbirth", "ssn"}
 PII_CONTAINS_TOKENS = {"email", "phone", "address", "street", "zipcode", "postalcode", "latitude", "longitude", "password", "birthdate", "ssn"}
 CANONICAL_ALIASES = {
     "order_id": {"orderid", "order_id", "invoice", "invoiceno", "transactionid", "transaction_id", "bookingid", "booking_id"},
@@ -91,9 +91,42 @@ def safe_record(row: dict[str, Any], redact_pii: bool) -> dict[str, Any]:
     }
 
 
-def read_csv(path: Path) -> list[dict[str, Any]]:
+def reservoir_sample(rows: Iterable[dict[str, Any]], limit: int, seed: int) -> tuple[list[dict[str, Any]], bool]:
+    randomizer = random.Random(seed)
+    sample: list[dict[str, Any]] = []
+    count = 0
+    for row in rows:
+        count += 1
+        if len(sample) < limit:
+            sample.append(row)
+            continue
+        replacement = randomizer.randrange(count)
+        if replacement < limit:
+            sample[replacement] = row
+    return sample, count > limit
+
+
+def read_csv(path: Path, limit: int, seed: int) -> tuple[list[dict[str, Any]], bool]:
     with path.open("r", encoding="utf-8-sig", newline="", errors="replace") as handle:
-        return list(csv.DictReader(handle))
+        return reservoir_sample(csv.DictReader(handle), limit, seed)
+
+
+def read_xlsx(path: Path, limit: int, seed: int) -> list[tuple[str, list[dict[str, Any]], bool]]:
+    from openpyxl import load_workbook
+
+    workbook = load_workbook(path, read_only=True, data_only=True)
+    tables = []
+    for worksheet in workbook.worksheets:
+        iterator = worksheet.iter_rows(values_only=True)
+        header = next(iterator, None)
+        if not header:
+            continue
+        columns = [str(value).strip() if value is not None else f"column_{index}" for index, value in enumerate(header)]
+        rows = (dict(zip(columns, values)) for values in iterator)
+        sample, truncated = reservoir_sample(rows, limit, seed + len(tables))
+        tables.append((f"{path.stem}_{worksheet.title}", sample, truncated))
+    workbook.close()
+    return tables
 
 
 def extract_archives(input_dir: Path, extraction_dir: Path) -> list[Path]:
@@ -113,17 +146,22 @@ def extract_archives(input_dir: Path, extraction_dir: Path) -> list[Path]:
     return targets
 
 
-def records_from_sources(input_dir: Path, extraction_dir: Path, max_rows_per_table: int, redact_pii: bool) -> tuple[list[tuple[str, dict[str, Any]]], list[dict[str, Any]]]:
+def records_from_sources(input_dir: Path, extraction_dir: Path, max_rows_per_table: int, redact_pii: bool, seed: int) -> tuple[list[tuple[str, dict[str, Any]]], list[dict[str, Any]]]:
     extracted_dirs = extract_archives(input_dir, extraction_dir)
-    paths = sorted({*input_dir.rglob("*.csv"), *(path for directory in extracted_dirs for path in directory.rglob("*.csv"))})
+    csv_paths = sorted({*input_dir.rglob("*.csv"), *(path for directory in extracted_dirs for path in directory.rglob("*.csv"))})
+    xlsx_paths = sorted({*input_dir.rglob("*.xlsx"), *(path for directory in extracted_dirs for path in directory.rglob("*.xlsx"))})
     records: list[tuple[str, dict[str, Any]]] = []
     lineage: list[dict[str, Any]] = []
-    for path in paths:
-        rows = read_csv(path)
-        sample = rows[:max_rows_per_table]
+    for path in csv_paths:
+        sample, truncated = read_csv(path, max_rows_per_table, seed)
         digest = sha256_file(path)
-        lineage.append({"file": str(path), "sha256": digest, "rows_read": len(rows), "rows_used": len(sample), "columns": list(rows[0]) if rows else []})
+        lineage.append({"file": str(path), "sha256": digest, "rows_used": len(sample), "truncated": truncated, "columns": list(sample[0]) if sample else []})
         records.extend((path.stem, safe_record(row, redact_pii)) for row in sample)
+    for path in xlsx_paths:
+        digest = sha256_file(path)
+        for table_name, sample, truncated in read_xlsx(path, max_rows_per_table, seed):
+            lineage.append({"file": str(path), "table": table_name, "sha256": digest, "rows_used": len(sample), "truncated": truncated, "columns": list(sample[0]) if sample else []})
+            records.extend((table_name, safe_record(row, redact_pii)) for row in sample)
     return records, lineage
 
 
@@ -169,6 +207,11 @@ def support_answer(record: dict[str, Any]) -> str:
 
 
 def build_examples(source: str, record: dict[str, Any], examples_per_row: int) -> list[dict[str, Any]]:
+    customer_prompt = record.get("customer_prompt")
+    agent_response = record.get("agent_response")
+    if customer_prompt and agent_response:
+        identifier = hashlib.sha256(f"{source}|{customer_prompt}|{agent_response}".encode("utf-8")).hexdigest()
+        return [{"id": identifier, "source_table": source, "messages": [{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": customer_prompt}, {"role": "assistant", "content": agent_response}]}]
     compact = json.dumps(record, ensure_ascii=False, separators=(",", ":"))
     issue_key = find_column(record.keys(), "issue")
     answer = support_answer(record) if issue_key else transaction_answer(record)
@@ -199,7 +242,7 @@ def prepare_data(config_path: str = "configs/dataset.yaml") -> dict[str, Any]:
     output_dir = Path(config["output_dir"])
     if not input_dir.exists():
         raise FileNotFoundError(f"Input directory does not exist: {input_dir}")
-    records, lineage = records_from_sources(input_dir, extraction_dir, config["sampling"]["max_rows_per_table"], config["quality"]["redact_pii"])
+    records, lineage = records_from_sources(input_dir, extraction_dir, config["sampling"]["max_rows_per_table"], config["quality"]["redact_pii"], config["split"]["seed"])
     generated = [example for source, record in records for example in build_examples(source, record, config["sampling"]["examples_per_row"])]
     examples = validate_examples(generated, config["quality"]["min_assistant_characters"])
     if not examples:

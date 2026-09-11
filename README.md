@@ -21,15 +21,17 @@ Qwen Hugging Face checkpoint → 4-bit NF4 → LoRA adapter → evaluation → f
 
 ## Dữ liệu
 
-Nguồn ưu tiên được cấu hình là [Retail Customer & Transaction Dataset](https://www.kaggle.com/datasets/raghavendragandhi/retail-customer-and-transaction-dataset). Nó có giao dịch, sản phẩm, chiến dịch, review và support tickets, phù hợp hơn dữ liệu sales đơn bảng cho use case Sales Operations. Dataset card hiện ghi giấy phép MIT; vẫn nên lưu phiên bản và kiểm tra điều khoản tại thời điểm tải.
+Nguồn hiện đã tải vào dự án là [UCI Online Retail](https://archive.ics.uci.edu/dataset/352/online+retail): 541.909 giao dịch của một nhà bán lẻ trực tuyến tại Anh, được phát hành theo CC BY 4.0. Pipeline đọc trực tiếp XLSX theo streaming và lấy mẫu ngẫu nhiên có seed, nên không cần chuyển đổi thủ công hoặc nạp toàn bộ dataset vào RAM.
 
-Đặt file ZIP tải từ Kaggle hoặc các CSV của nó vào `data/raw/`. Pipeline tự:
+Đặt file ZIP, CSV hoặc XLSX vào `data/raw/`. Pipeline tự:
 
 - kiểm tra đường dẫn ZIP trước khi giải nén;
 - loại các cột có dấu hiệu PII như tên, email, điện thoại, địa chỉ và toạ độ;
 - biến mỗi bản ghi thành conversation tiếng Việt theo chat format;
 - chỉ huấn luyện loss trên phần trả lời của assistant;
 - tạo `train.jsonl`, `validation.jsonl` và `manifest.json` chứa checksum, schema và số dòng nguồn.
+
+`data/raw/vietnamese_sales_playbook.csv` là 17 kịch bản gốc tiếng Việt cho nội thất và điện máy: khám phá nhu cầu, ngân sách, so sánh, giao lắp, trả góp, bảo hành, đổi trả và hàng hết. Đây là nội dung mẫu tự tạo, không sao chép catalogue hay hội thoại của bất kỳ nhà bán lẻ nào.
 
 Không dùng trực tiếp PII thật cho training. Dataset giao dịch chỉ giúp model học cách trình bày, kiểm tra giả định và đề xuất hành động; số liệu live phải do tool hoặc database đã phân quyền cung cấp lúc inference.
 
@@ -49,10 +51,13 @@ QLoRA 4-bit yêu cầu NVIDIA CUDA, PyTorch CUDA và VRAM đủ cho Qwen 9B cùn
 
 ```powershell
 .\scripts\prepare_data.ps1
+.\scripts\generate_sales_playbook.ps1
 .\scripts\train.ps1
 .\scripts\evaluate.ps1
 .\scripts\infer.ps1 'Phân tích dữ liệu: {"Product_Category":"Electronics","Quantity":4,"Unit_Price":120,"Discount_Applied":10}'
 ```
+
+`generate_sales_playbook.ps1` tạo 1.000.000 mẫu synthetic tiếng Việt, tách xác định theo hash thành train và validation. Tập này phủ nội thất và điện máy, gồm discovery, tư vấn theo ngân sách, so sánh, chi phí sử dụng, tương thích, trả góp minh bạch, giao-lắp, đổi trả, bảo hành, tồn kho và mua doanh nghiệp. Các mẫu bắt buộc tôn trọng quyền quyết định, không khan hiếm giả, không phí ẩn và không gây áp lực.
 
 Artifacts của mỗi lần train nằm trong `artifacts/runs/qwen35-sales-qlora/`:
 
