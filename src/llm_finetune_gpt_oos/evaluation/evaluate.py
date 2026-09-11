@@ -13,7 +13,7 @@ def evaluate_model(config_path: str = "configs/train.yaml", adapter_path: str | 
     training = config["training"]
     resolved_adapter = adapter_path or str(training["output_dir"] + "/final_adapter")
     model, tokenizer = load_adapter(config["model"], resolved_adapter)
-    dataset = ConversationDataset(training["validation_file"], tokenizer, training["max_seq_length"])
+    dataset = ConversationDataset(training["validation_file"], tokenizer, training["max_seq_length"], config["model"].get("cache_dir"))
     arguments = build_training_arguments({**training, "output_dir": str(training["output_dir"] + "/evaluation")})
     trainer = Trainer(model=model, args=arguments, eval_dataset=dataset, data_collator=DataCollatorForSeq2Seq(tokenizer=tokenizer, label_pad_token_id=-100, pad_to_multiple_of=8))
     metrics = trainer.evaluate()
